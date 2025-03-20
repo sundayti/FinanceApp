@@ -1,0 +1,31 @@
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: finance_postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: financedb
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -h localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build: .
+    container_name: finance_app_console
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      - ConnectionStrings__Main=Host=db;Port=5432;Database=financedb;Username=postgres;Password=postgres
+    tty: true
+    stdin_open: true
+
+volumes:
+  db_data:
