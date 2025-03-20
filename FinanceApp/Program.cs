@@ -1,13 +1,14 @@
-﻿using Application.Facades;
+﻿using System;
+using Application.Facades;
 using Application.Infrastructure;
 using Application.Repositories;
 using Application.Proxy;
-using Application.Repositories;
 using Application.Services;
 using Application.UI;
 using Domain.Factories;
 using Domain.Interfaces;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace FinanceApp
 {
@@ -15,37 +16,39 @@ namespace FinanceApp
     {
         private static void Main()
         {
+            var services = new ServiceCollection();
+
             var connectionString = Environment.GetEnvironmentVariable("ConnectionStrings__Main")
                                    ?? "Host=localhost;Port=5432;Database=financedb;Username=postgres;Password=postgres";
-            var optionsBuilder = new DbContextOptionsBuilder<FinanceDbContext>();
-            optionsBuilder.UseNpgsql(connectionString);
+            services.AddDbContext<FinanceDbContext>(options => options.UseNpgsql(connectionString));
 
-            using var dbContext = new FinanceDbContext(optionsBuilder.Options);
-            dbContext.Database.Migrate();
-
-            IBankAccountRepository realAccountRepo = new BankAccountRepository(dbContext);
-            ICategoryRepository realCategoryRepo = new CategoryRepository(dbContext);
-            IOperationRepository realOperationRepo = new OperationRepository(dbContext);
+            services.AddScoped<BankAccountRepository>();
+            services.AddScoped<CategoryRepository>();
+            services.AddScoped<OperationRepository>();
             
-            IBankAccountRepository proxyAccountRepo = new BankAccountRepositoryProxy(realAccountRepo);
-            ICategoryRepository proxyCategoryRepo = new CategoryRepositoryProxy(realCategoryRepo);
-            IOperationRepository proxyOperationRepo = new OperationRepositoryProxy(realOperationRepo);
-            
-            var factory = new FinanceFactory();
-            var accountFacade = new BankAccountFacade(proxyAccountRepo, factory);
+            services.AddScoped<IBankAccountRepository>(sp =>
+                new BankAccountRepositoryProxy(sp.GetRequiredService<BankAccountRepository>()));
+            services.AddScoped<ICategoryRepository>(sp =>
+                new CategoryRepositoryProxy(sp.GetRequiredService<CategoryRepository>()));
+            services.AddScoped<IOperationRepository>(sp =>
+                new OperationRepositoryProxy(sp.GetRequiredService<OperationRepository>()));
 
-            var analyticsService = new AnalyticsService(dbContext);
+            services.AddScoped<FinanceFactory>();
+            services.AddScoped<BankAccountFacade>();
+            services.AddScoped<AnalyticsService>();
+            services.AddScoped<FinancialModuleFacade>();
+            services.AddScoped<ApplicationUi>();
 
-            var financialModuleFacade = new FinancialModuleFacade(
-                analyticsService, 
-                factory,
-                accountFacade,
-                proxyCategoryRepo,
-                proxyOperationRepo
-            );
+            var serviceProvider = services.BuildServiceProvider();
 
-            var appUi = new ApplicationUi(accountFacade, financialModuleFacade, proxyCategoryRepo, proxyOperationRepo);
-            appUi.Run();
+            using (var scope = serviceProvider.CreateScope())
+            {
+                var dbContext = scope.ServiceProvider.GetRequiredService<FinanceDbContext>();
+                dbContext.Database.Migrate();
+
+                var appUi = scope.ServiceProvider.GetRequiredService<ApplicationUi>();
+                appUi.Run();
+            }
 
             Console.WriteLine("Завершение работы приложения.");
             Console.ReadKey();
